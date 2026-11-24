@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A simple glowing ring: placeholder icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:strokeColor="#4FD1FF"
+        android:strokeWidth="5"
+        android:fillColor="#00000000"
+        android:pathData="M54,32 A22,22 0 1,1 53.99,32 Z" />
+    <path
+        android:fillColor="#4FD1FF"
+        android:pathData="M54,45 A9,9 0 1,1 53.99,45 Z" />
+</vector>
