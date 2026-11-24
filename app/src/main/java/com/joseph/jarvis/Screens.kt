@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -54,8 +56,13 @@ fun fmtDate(t: Long): String = SimpleDateFormat("d MMM yyyy", Locale.UK).format(
 
 @Composable
 fun AccessScreen(requestAccess: () -> Unit) {
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Jarvis needs \"All files access\"", style = MaterialTheme.typography.titleMedium)
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Core(Modifier.size(200.dp)) { HudLabel("Locked", color = Hud.Red) }
+        HudLabel("Access required", size = 14.sp)
         Text(
             "So it can find audiobook files left in Downloads and move them to its archive. " +
                 "Tap below, switch on \"Allow access to manage all files\", then come back."

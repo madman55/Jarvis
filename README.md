@@ -2,6 +2,7 @@
 
 A personal phone assistant for Android, built in stages.
 
+**Look:** a dark HUD home screen: animated core with clock, live storage / power / memory gauges, and every section wired to the core.
 **Music:** search the songs on your phone and play them, or send a search straight to your music app (chosen in Settings).
 **Apps:** search and open any app on the phone.
 
