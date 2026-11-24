@@ -21,4 +21,13 @@ object Prefs {
             ?: ""
 
     fun setLibrary(ctx: Context, path: String) = sp(ctx).edit().putString("library", path.trim()).apply()
+
+    /** The music app Jarvis sends "play X" requests to. Guesses one with "tube" in its name at first. */
+    fun musicApp(ctx: Context): String? =
+        sp(ctx).getString("musicApp", null)
+            ?: Apps.musicApps(ctx).firstOrNull { it.label.contains("tube", ignoreCase = true) }?.packageName
+            ?: Apps.launchable(ctx).firstOrNull { it.label.contains("tube", ignoreCase = true) }?.packageName
+            ?: Apps.musicApps(ctx).firstOrNull()?.packageName
+
+    fun setMusicApp(ctx: Context, pkg: String) = sp(ctx).edit().putString("musicApp", pkg).apply()
 }

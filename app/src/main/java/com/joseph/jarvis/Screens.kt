@@ -337,6 +337,8 @@ fun SettingsScreen() {
         candidates.forEach { c ->
             TextButton(onClick = { library = c.path; Prefs.setLibrary(ctx, c.path) }) { Text(c.path) }
         }
+        HorizontalDivider()
+        MusicAppPicker()
         Spacer(Modifier.height(8.dp))
         Text(
             "Tip: Smart AudioBook Player shows which folder it uses as its library (its \"root\" folder) in its own settings.",

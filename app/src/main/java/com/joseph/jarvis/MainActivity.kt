@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -109,14 +109,16 @@ fun App(hasAccess: Boolean, requestAccess: () -> Unit) {
             if (!hasAccess) {
                 AccessScreen(requestAccess)
             } else {
-                TabRow(selectedTabIndex = tab) {
-                    listOf("Clean up", "Archive", "Settings").forEachIndexed { i, title ->
+                ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
+                    listOf("Music", "Apps", "Clean up", "Archive", "Settings").forEachIndexed { i, title ->
                         Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
                     }
                 }
                 when (tab) {
-                    0 -> CleanupScreen(onNotice = { notice = it })
-                    1 -> ArchiveScreen(onNotice = { notice = it })
+                    0 -> MusicScreen(onNotice = { notice = it })
+                    1 -> AppsScreen(onNotice = { notice = it })
+                    2 -> CleanupScreen(onNotice = { notice = it })
+                    3 -> ArchiveScreen(onNotice = { notice = it })
                     else -> SettingsScreen()
                 }
             }
