@@ -464,9 +464,9 @@ private fun DateStrip(now: Long) {
 private fun CoreWithNodes(now: Long, onOpen: (Dest) -> Unit) {
     val left = listOf(Dest.Music, Dest.Apps, Dest.Cleanup)
     val right = listOf(Dest.Archive, Dest.Settings, null) // null = "Voice", coming in stage 3
-    val rows = listOf(0.16f, 0.5f, 0.84f)
+    val rows = listOf(0.12f, 0.5f, 0.88f)
 
-    BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(1f / 1.02f)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(1f / 0.92f)) {
         val w = maxWidth
         val h = maxHeight
         val coreSize = w * 0.6f
@@ -476,7 +476,7 @@ private fun CoreWithNodes(now: Long, onOpen: (Dest) -> Unit) {
         Canvas(Modifier.fillMaxSize()) {
             val c = Offset(size.width / 2, size.height / 2)
             val r = with(density) { coreSize.toPx() } / 2
-            val labelEdge = with(density) { 84.dp.toPx() }
+            val labelEdge = with(density) { 96.dp.toPx() }
             rows.forEach { fy ->
                 listOf(false, true).forEach { isRight ->
                     val y = size.height * fy
@@ -504,10 +504,10 @@ private fun CoreWithNodes(now: Long, onOpen: (Dest) -> Unit) {
 
         rows.forEachIndexed { i, fy ->
             NodeLabel(left[i].label, enabled = true, alignEnd = false,
-                modifier = Modifier.offset(x = 4.dp, y = h * fy - 14.dp)) { onOpen(left[i]) }
+                modifier = Modifier.offset(x = 12.dp, y = h * fy - 14.dp)) { onOpen(left[i]) }
             val d = right[i]
-            NodeLabel(d?.label ?: "Voice · soon", enabled = d != null, alignEnd = true,
-                modifier = Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = h * fy - 14.dp)) { d?.let(onOpen) }
+            NodeLabel(d?.label ?: "Voice", enabled = d != null, alignEnd = true,
+                modifier = Modifier.align(Alignment.TopEnd).offset(x = (-12).dp, y = h * fy - 14.dp)) { d?.let(onOpen) }
         }
     }
 }
