@@ -1,6 +1,10 @@
 package com.joseph.jarvis
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -81,6 +85,7 @@ fun CleanupScreen(onNotice: (String) -> Unit) {
     var selected by remember { mutableStateOf(setOf<String>()) }
     var busy by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
+    var group by remember { mutableStateOf(Grouping.Relevance) }
 
     fun scan() {
         busy = true
@@ -121,33 +126,22 @@ fun CleanupScreen(onNotice: (String) -> Unit) {
                 CircularProgressIndicator()
             }
         } else if (list != null && list.isNotEmpty()) {
-            val dupes = list.filter { it.inLibrary }
-            val others = list.filter { !it.inLibrary }
+            GroupChips(group) { group = it }
+            val groups = groupItems(list, group)
 
             LazyColumn(Modifier.weight(1f)) {
-                if (dupes.isNotEmpty()) {
-                    item(key = "h-dupes") {
+                groups.forEach { (title, subtitle, members) ->
+                    item(key = "h-$title") {
                         SectionHeader(
-                            "Already in your audiobook library",
-                            "Copies in Downloads you probably don't need.",
-                            onSelectAll = { selected = selected + dupes.map { it.file.path } },
+                            "$title · ${members.size} · ${fmtSize(members.sumOf { it.sizeBytes })}",
+                            subtitle,
+                            onSelectAll = {
+                                val paths = members.map { it.file.path }
+                                selected = if (selected.containsAll(paths)) selected - paths.toSet() else selected + paths
+                            },
                         )
                     }
-                    items(dupes, key = { it.file.path }) { item ->
-                        ItemRow(item, item.file.path in selected) {
-                            selected = if (item.file.path in selected) selected - item.file.path else selected + item.file.path
-                        }
-                    }
-                }
-                if (others.isNotEmpty()) {
-                    item(key = "h-others") {
-                        SectionHeader(
-                            "Not in your library",
-                            "Leftovers from deleted books, or ones you haven't added yet. Check before archiving.",
-                            onSelectAll = { selected = selected + others.map { it.file.path } },
-                        )
-                    }
-                    items(others, key = { it.file.path }) { item ->
+                    items(members, key = { it.file.path }) { item ->
                         ItemRow(item, item.file.path in selected) {
                             selected = if (item.file.path in selected) selected - item.file.path else selected + item.file.path
                         }
@@ -241,67 +235,121 @@ fun ArchiveScreen(onNotice: (String) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var entries by remember { mutableStateOf<List<ArchiveEntry>>(emptyList()) }
-    var toDelete by remember { mutableStateOf<ArchiveEntry?>(null) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
 
     fun load() {
-        scope.launch { entries = withContext(Dispatchers.IO) { Archive.list() } }
+        scope.launch {
+            entries = withContext(Dispatchers.IO) { Archive.list() }
+            selected = selected.filter { p -> entries.any { it.archived.path == p } }.toSet()
+        }
     }
     LaunchedEffect(Unit) { load() }
 
+    val chosen = entries.filter { it.archived.path in selected }
+    val allOn = entries.isNotEmpty() && chosen.size == entries.size
+
     Column(Modifier.fillMaxSize()) {
-        Text(
-            if (entries.isEmpty()) "The archive is empty."
-            else "${entries.size} item(s) · ${fmtSize(entries.sumOf { it.sizeBytes })}. " +
-                "Each is deleted ${Archive.KEEP_DAYS} days after archiving.",
-            modifier = Modifier.padding(16.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (entries.isEmpty()) "The archive is empty."
+                else "${entries.size} item(s) · ${fmtSize(entries.sumOf { it.sizeBytes })}\n" +
+                    "Auto-deleted ${Archive.KEEP_DAYS} days after archiving.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            if (entries.isNotEmpty()) {
+                TextButton(onClick = {
+                    selected = if (allOn) emptySet() else entries.map { it.archived.path }.toSet()
+                }) { Text(if (allOn) "Select none" else "Select all") }
+            }
+        }
+
+        if (busy) {
+            Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
+                CircularProgressIndicator()
+            }
+        }
+
         LazyColumn(Modifier.weight(1f)) {
             items(entries, key = { it.archived.path }) { e ->
+                val on = e.archived.path in selected
+                val toggle = { selected = if (on) selected - e.archived.path else selected + e.archived.path }
                 val daysLeft = Archive.KEEP_DAYS - ((System.currentTimeMillis() - e.time) / 86_400_000L).toInt()
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Text(e.archived.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
-                    Text(
-                        "${fmtSize(e.sizeBytes)} · archived ${fmtDate(e.time)} · $daysLeft day(s) left",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "From: ${e.original.parent}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        maxLines = 1,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = {
-                            scope.launch {
-                                val ok = withContext(Dispatchers.IO) { Archive.restore(ctx, e) }
-                                onNotice(if (ok) "Restored ${e.archived.name}." else "Couldn't restore ${e.archived.name}.")
-                                load()
-                            }
-                        }) { Text("Restore") }
-                        TextButton(onClick = { toDelete = e }) { Text("Delete now") }
+                Row(
+                    Modifier.fillMaxWidth().clickable(onClick = toggle).padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = on, onCheckedChange = { toggle() })
+                    Column(Modifier.weight(1f)) {
+                        Text(e.archived.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+                        Text(
+                            "${fmtSize(e.sizeBytes)} · archived ${fmtDate(e.time)} · $daysLeft day(s) left",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            "From: ${e.original.parent}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            maxLines = 1,
+                        )
                     }
                 }
-                HorizontalDivider()
+            }
+        }
+
+        if (entries.isNotEmpty()) {
+            HorizontalDivider()
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    enabled = chosen.isNotEmpty() && !busy,
+                    onClick = {
+                        busy = true
+                        scope.launch {
+                            val failed = withContext(Dispatchers.IO) { chosen.count { !Archive.restore(ctx, it) } }
+                            onNotice(if (failed == 0) "Restored ${chosen.size} item(s)." else "Restored ${chosen.size - failed}; $failed failed.")
+                            selected = emptySet()
+                            busy = false
+                            load()
+                        }
+                    },
+                ) { Text("Restore") }
+                Button(
+                    enabled = chosen.isNotEmpty() && !busy,
+                    onClick = { confirmDelete = true },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Hud.Red, contentColor = Hud.Bg),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(if (chosen.isEmpty()) "Select to delete" else "Delete ${chosen.size} · ${fmtSize(chosen.sumOf { it.sizeBytes })}")
+                }
             }
         }
     }
 
-    toDelete?.let { e ->
+    if (confirmDelete) {
         AlertDialog(
-            onDismissRequest = { toDelete = null },
-            title = { Text("Delete for good?") },
-            text = { Text("\"${e.archived.name}\" will be permanently removed. This can't be undone.") },
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete ${chosen.size} item(s) for good?") },
+            text = { Text("This frees ${fmtSize(chosen.sumOf { it.sizeBytes })} and can't be undone.") },
             confirmButton = {
                 TextButton(onClick = {
-                    toDelete = null
+                    confirmDelete = false
+                    busy = true
+                    val doomed = chosen
                     scope.launch {
-                        withContext(Dispatchers.IO) { Archive.deleteForever(ctx, e) }
-                        onNotice("Deleted ${e.archived.name}.")
+                        withContext(Dispatchers.IO) { doomed.forEach { Archive.deleteForever(ctx, it) } }
+                        onNotice("Deleted ${doomed.size} item(s), ${fmtSize(doomed.sumOf { it.sizeBytes })} freed.")
+                        selected = emptySet()
+                        busy = false
                         load()
                     }
-                }) { Text("Delete") }
+                }) { Text("Delete", color = Hud.Red) }
             },
-            dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
 }
@@ -351,5 +399,57 @@ fun SettingsScreen() {
             "Tip: Smart AudioBook Player shows which folder it uses as its library (its \"root\" folder) in its own settings.",
             style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+// ---------------------------------------------------------------- grouping
+
+enum class Grouping(val label: String) { Relevance("Relevance"), Date("Date"), Size("Size"), Name("A–Z") }
+
+data class Group(val title: String, val subtitle: String, val items: List<Item>)
+
+/** Splits the scan results into headed groups, depending on the chosen grouping. */
+fun groupItems(list: List<Item>, by: Grouping): List<Group> = when (by) {
+    Grouping.Relevance -> listOf(
+        Group("Already in your library", "Copies in Downloads you probably don't need.", list.filter { it.inLibrary }),
+        Group("Not in your library", "Leftovers from deleted books, or ones you haven't added yet. Check before archiving.",
+            list.filter { !it.inLibrary }),
+    ).filter { it.items.isNotEmpty() }
+
+    Grouping.Date -> list.sortedByDescending { it.lastModified }
+        .groupBy { SimpleDateFormat("MMMM yyyy", Locale.UK).format(Date(it.lastModified)) }
+        .map { (month, items) -> Group(month, "Downloaded or last changed this month.", items) }
+
+    Grouping.Size -> listOf(
+        Group("Over 1 GB", "The biggest wins.", list.filter { it.sizeBytes >= 1L shl 30 }),
+        Group("250 MB to 1 GB", "", list.filter { it.sizeBytes in (250L shl 20) until (1L shl 30) }),
+        Group("Under 250 MB", "", list.filter { it.sizeBytes < 250L shl 20 }),
+    ).map { g -> g.copy(items = g.items.sortedByDescending { it.sizeBytes }) }.filter { it.items.isNotEmpty() }
+
+    Grouping.Name -> list.sortedBy { it.name.lowercase() }
+        .groupBy { it.name.firstOrNull()?.uppercaseChar()?.takeIf { c -> c.isLetter() } ?: '#' }
+        .map { (letter, items) -> Group(letter.toString(), "", items) }
+}
+
+@Composable
+fun GroupChips(current: Grouping, onPick: (Grouping) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HudLabel("Group", size = 10.sp, color = Hud.CyanDim)
+        Grouping.values().forEach { g ->
+            val on = g == current
+            Box(
+                Modifier
+                    .border(1.dp, if (on) Hud.Cyan else Hud.CyanFaint, PanelShape)
+                    .background(if (on) Hud.Cyan.copy(alpha = 0.18f) else Color.Transparent, PanelShape)
+                    .clickable { onPick(g) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                HudLabel(g.label, size = 10.sp, color = if (on) Hud.Cyan else Hud.CyanDim)
+            }
+        }
     }
 }
