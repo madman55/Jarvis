@@ -12,6 +12,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -59,42 +68,37 @@ fun MusicScreen(onNotice: (String) -> Unit) {
         )
 
         musicApp?.let { app ->
-            Button(
+            HudButton(
+                if (query.isBlank()) "Open ${app.label}" else "Play \"${query.trim()}\" in ${app.label}",
                 onClick = {
                     if (!Apps.playInApp(ctx, app.packageName, query.trim())) onNotice("Couldn't open ${app.label}.")
                 },
+                filled = query.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            ) {
-                Text(if (query.isBlank()) "Open ${app.label}" else "Play \"${query.trim()}\" in ${app.label}")
-            }
+            )
         }
 
         val list = tracks
         if (list == null) {
-            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            RadarScan("Indexing music", "reading library…")
         } else {
             val shown = list.filter { Music.matches(it, query) }
-            Text(
-                "On this phone: ${shown.size} of ${list.size} song(s)",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
-            )
+            HudSection("On this phone · ${shown.size} of ${list.size}")
             LazyColumn(Modifier.weight(1f)) {
-                items(shown, key = { it.id }) { t ->
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .clickable { if (!Music.play(ctx, t)) onNotice("No app on the phone can play that file.") }
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                    ) {
-                        Text(t.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-                        Text(
-                            listOf(t.artist, t.album, Music.fmtDuration(t.durationMs)).filter { it.isNotBlank() }.joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                        )
+                itemsIndexed(shown, key = { _, it -> it.id }) { i, t ->
+                    HudCard(index = i, onClick = { if (!Music.play(ctx, t)) onNotice("No app on the phone can play that file.") }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(t.title, color = Hud.Text, fontSize = 15.sp, maxLines = 1)
+                                HudData(
+                                    listOf(t.artist, t.album).filter { it.isNotBlank() }.joinToString("  ·  "),
+                                    color = Hud.Text.copy(alpha = 0.6f), size = 11.dp,
+                                )
+                            }
+                            HudData(Music.fmtDuration(t.durationMs), color = Hud.Cyan, modifier = Modifier.padding(start = 8.dp))
+                            HudLabel("▶", modifier = Modifier.padding(start = 12.dp))
+                        }
                     }
-                    HorizontalDivider()
                 }
             }
         }
@@ -121,23 +125,17 @@ fun AppsScreen(onNotice: (String) -> Unit) {
         )
         val list = apps
         if (list == null) {
-            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            RadarScan("Reading app registry", "")
         } else {
             val shown = list.filter { it.label.contains(query.trim(), ignoreCase = true) }
-            LazyColumn(Modifier.weight(1f)) {
-                items(shown, key = { it.packageName }) { app ->
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .clickable { if (!Apps.open(ctx, app.packageName)) onNotice("Couldn't open ${app.label}.") }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        app.icon?.let {
-                            Image(bitmap = it.asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp))
-                        } ?: Box(Modifier.size(40.dp))
-                        Text(app.label, style = MaterialTheme.typography.bodyLarge)
-                    }
+            HudSection("Installed · ${shown.size}")
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+            ) {
+                items(shown.size, key = { shown[it].packageName }) { i ->
+                    val app = shown[i]
+                    AppTile(app, i) { if (!Apps.open(ctx, app.packageName)) onNotice("Couldn't open ${app.label}.") }
                 }
             }
         }
@@ -189,5 +187,46 @@ fun MusicAppPicker() {
         androidx.compose.material3.TextButton(onClick = { showAll = !showAll }) {
             Text(if (showAll) "Show music apps only" else "Show all apps")
         }
+    }
+}
+
+/** An app as a hexagon-framed icon with its name underneath. */
+@Composable
+private fun AppTile(app: AppInfo, index: Int, onClick: () -> Unit) {
+    val appear = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay((index.coerceAtMost(16) * 20).toLong())
+        appear.animateTo(1f, androidx.compose.animation.core.tween(220))
+    }
+    Column(
+        Modifier
+            .padding(4.dp)
+            .graphicsLayer { alpha = appear.value; scaleX = 0.8f + 0.2f * appear.value; scaleY = scaleX }
+            .clickable { Fx.tap(); onClick() }
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.matchParentSize()) {
+                val r = size.minDimension / 2
+                val path = Path()
+                for (k in 0 until 6) {
+                    val a = Math.toRadians(60.0 * k - 90)
+                    val x = center.x + r * kotlin.math.cos(a).toFloat()
+                    val y = center.y + r * kotlin.math.sin(a).toFloat()
+                    if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                path.close()
+                drawPath(path, Hud.Cyan.copy(alpha = 0.07f))
+                drawPath(path, Hud.CyanDim, style = Stroke(1.5f))
+            }
+            app.icon?.let {
+                Image(bitmap = it.asImageBitmap(), contentDescription = null, modifier = Modifier.size(34.dp))
+            }
+        }
+        Text(
+            app.label, color = Hud.Text, fontSize = 11.sp, maxLines = 1,
+            textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }

@@ -30,4 +30,12 @@ object Prefs {
             ?: Apps.musicApps(ctx).firstOrNull()?.packageName
 
     fun setMusicApp(ctx: Context, pkg: String) = sp(ctx).edit().putString("musicApp", pkg).apply()
+
+    /** Sounds and vibrations on taps. */
+    fun effects(ctx: Context): Boolean = sp(ctx).getBoolean("effects", true)
+    fun setEffects(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("effects", on).apply()
+
+    /** Optional Claude API key: makes voice understand anything, not just simple commands. */
+    fun apiKey(ctx: Context): String = sp(ctx).getString("apiKey", null) ?: ""
+    fun setApiKey(ctx: Context, key: String) = sp(ctx).edit().putString("apiKey", key.trim()).apply()
 }

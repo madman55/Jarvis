@@ -26,13 +26,15 @@ object Scanner {
      * A folder that directly holds audio files counts as one book.
      * Loose audio files sitting straight in Downloads count one each.
      */
-    fun scanDownloads(downloads: File, library: File?): List<Item> {
+    fun scanDownloads(downloads: File, library: File?, onProgress: (Int) -> Unit = {}): List<Item> {
         val libraryNames = library?.let { indexLibrary(it) } ?: emptySet()
         val skip = listOfNotNull(library?.canonicalPath, Archive.root().canonicalPath)
         val found = mutableListOf<Item>()
+        var visited = 0
 
         fun walk(dir: File) {
             if (dir.canonicalPath in skip) return
+            onProgress(++visited)
             val children = dir.listFiles() ?: return
             val audio = children.filter { isAudio(it) }
 

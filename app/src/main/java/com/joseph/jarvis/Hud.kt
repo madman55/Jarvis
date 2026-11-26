@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -162,7 +163,7 @@ fun HudScreen(title: String, onBack: () -> Unit, content: @Composable () -> Unit
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                Modifier.clickable(onClick = onBack).padding(8.dp),
+                Modifier.clickable { Fx.tap(); onBack() }.padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 MiniCore(Modifier.size(28.dp))
@@ -235,7 +236,7 @@ fun MiniCore(modifier: Modifier = Modifier) {
 
 /** The big animated centrepiece: rotating rings, tick marks and a glowing centre. */
 @Composable
-fun Core(modifier: Modifier = Modifier, center: @Composable () -> Unit) {
+fun Core(modifier: Modifier = Modifier, energy: Float = 0f, center: @Composable () -> Unit) {
     val a1 = spin(40_000)
     val a2 = spin(24_000, reverse = true)
     val a3 = spin(9_000)
@@ -293,10 +294,10 @@ fun Core(modifier: Modifier = Modifier, center: @Composable () -> Unit) {
             // the glow
             drawCircle(
                 Brush.radialGradient(
-                    listOf(Hud.Cyan.copy(alpha = 0.55f * pulse), Hud.Cyan.copy(alpha = 0.12f), Color.Transparent),
-                    center = c, radius = r * 0.55f,
+                    listOf(Hud.Cyan.copy(alpha = (0.55f * pulse + 0.45f * energy).coerceAtMost(1f)), Hud.Cyan.copy(alpha = 0.12f + 0.2f * energy), Color.Transparent),
+                    center = c, radius = r * (0.55f + 0.3f * energy),
                 ),
-                r * 0.55f, c,
+                r * (0.55f + 0.3f * energy), c,
             )
             drawCircle(Hud.Bg.copy(alpha = 0.85f), r * 0.42f, c)
             ring(r * 0.42f, Hud.Cyan, 3f)
@@ -345,7 +346,7 @@ fun readCounts(ctx: Context): HomeCounts {
 enum class Dest(val label: String) { Music("Music"), Apps("Apps"), Cleanup("Clean up"), Archive("Archive"), Settings("Settings") }
 
 @Composable
-fun HomeScreen(notice: String?, onOpen: (Dest) -> Unit) {
+fun HomeScreen(notice: String?, voice: VoiceSession, onOpen: (Dest) -> Unit) {
     val ctx = LocalContext.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var stats by remember { mutableStateOf<SysStats?>(null) }
@@ -385,7 +386,12 @@ fun HomeScreen(notice: String?, onOpen: (Dest) -> Unit) {
         DateStrip(now)
 
         // core with menu nodes around it
-        CoreWithNodes(now, onOpen)
+        CoreWithNodes(now, voice, onOpen)
+        VoicePanel(voice)
+        if (voice.heard.isBlank() && voice.reply.isBlank() && voice.state == VoiceState.Idle) {
+            HudLabel("Tap the core to speak", size = 10.sp, color = Hud.CyanFaint, align = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
+        }
 
         // gauges
         val s = stats
@@ -461,9 +467,9 @@ private fun DateStrip(now: Long) {
 
 /** The core in the middle with the destinations wired to it on both sides. */
 @Composable
-private fun CoreWithNodes(now: Long, onOpen: (Dest) -> Unit) {
+private fun CoreWithNodes(now: Long, voice: VoiceSession, onOpen: (Dest) -> Unit) {
     val left = listOf(Dest.Music, Dest.Apps, Dest.Cleanup)
-    val right = listOf(Dest.Archive, Dest.Settings, null) // null = "Voice", coming in stage 3
+    val right = listOf(Dest.Archive, Dest.Settings, null) // null = the Voice node
     val rows = listOf(0.12f, 0.5f, 0.88f)
 
     BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(1f / 0.92f)) {
@@ -492,13 +498,36 @@ private fun CoreWithNodes(now: Long, onOpen: (Dest) -> Unit) {
             }
         }
 
-        Core(Modifier.size(coreSize).align(Alignment.Center)) {
+        val thinkT = rememberInfiniteTransition(label = "think")
+        val think by thinkT.animateFloat(0.2f, 0.8f, infiniteRepeatable(tween(400), RepeatMode.Reverse), label = "t")
+        val energy = when (voice.state) {
+            VoiceState.Listening -> 0.25f + voice.level * 0.75f
+            VoiceState.Thinking -> think
+            VoiceState.Speaking -> 0.45f
+            VoiceState.Idle -> 0f
+        }
+        Core(
+            Modifier.size(coreSize).align(Alignment.Center)
+                .clip(CircleShape)
+                .clickable { voice.toggle() },
+            energy = energy,
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    SimpleDateFormat("HH:mm", Locale.UK).format(Date(now)),
-                    color = Hud.Text, fontFamily = Hud.Mono, fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                )
-                HudLabel(SimpleDateFormat("d MMM", Locale.UK).format(Date(now)), size = 10.sp, color = Hud.CyanDim)
+                when (voice.state) {
+                    VoiceState.Idle -> {
+                        Text(
+                            SimpleDateFormat("HH:mm", Locale.UK).format(Date(now)),
+                            color = Hud.Text, fontFamily = Hud.Mono, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                        )
+                        HudLabel(SimpleDateFormat("d MMM", Locale.UK).format(Date(now)), size = 10.sp, color = Hud.CyanDim)
+                    }
+                    VoiceState.Listening -> {
+                        MicBars(voice.level)
+                        HudLabel("Listening", size = 10.sp, modifier = Modifier.padding(top = 6.dp))
+                    }
+                    VoiceState.Thinking -> HudLabel("Processing", size = 11.sp)
+                    VoiceState.Speaking -> HudLabel("Speaking", size = 11.sp)
+                }
             }
         }
 
@@ -506,8 +535,10 @@ private fun CoreWithNodes(now: Long, onOpen: (Dest) -> Unit) {
             NodeLabel(left[i].label, enabled = true, alignEnd = false,
                 modifier = Modifier.offset(x = 12.dp, y = h * fy - 14.dp)) { onOpen(left[i]) }
             val d = right[i]
-            NodeLabel(d?.label ?: "Voice", enabled = d != null, alignEnd = true,
-                modifier = Modifier.align(Alignment.TopEnd).offset(x = (-12).dp, y = h * fy - 14.dp)) { d?.let(onOpen) }
+            NodeLabel(d?.label ?: "Voice", enabled = true, alignEnd = true,
+                modifier = Modifier.align(Alignment.TopEnd).offset(x = (-12).dp, y = h * fy - 14.dp)) {
+                if (d != null) onOpen(d) else voice.toggle()
+            }
         }
     }
 }
@@ -518,7 +549,7 @@ private fun NodeLabel(text: String, enabled: Boolean, alignEnd: Boolean, modifie
         modifier
             .width(80.dp)
             .height(28.dp)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled) { Fx.tap(); onClick() },
         contentAlignment = if (alignEnd) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
         HudLabel(
@@ -527,5 +558,19 @@ private fun NodeLabel(text: String, enabled: Boolean, alignEnd: Boolean, modifie
             color = if (enabled) Hud.Cyan else Hud.CyanFaint,
             align = if (alignEnd) TextAlign.End else TextAlign.Start,
         )
+    }
+}
+
+/** Five little bars that jump with your voice while listening. */
+@Composable
+private fun MicBars(level: Float) {
+    val shape = listOf(0.45f, 0.8f, 1f, 0.8f, 0.45f)
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        shape.forEach { k ->
+            Box(
+                Modifier.width(5.dp).height((6 + 34 * level * k).dp)
+                    .background(Hud.Cyan, CutCornerShape(1.dp))
+            )
+        }
     }
 }

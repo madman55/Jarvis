@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -40,6 +42,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -86,13 +90,15 @@ fun CleanupScreen(onNotice: (String) -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
     var group by remember { mutableStateOf(Grouping.Relevance) }
+    var scanned by remember { mutableIntStateOf(0) }
 
     fun scan() {
         busy = true
         scope.launch {
             val downloads = File(Prefs.downloads(ctx))
             val lib = Prefs.library(ctx).takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { it.isDirectory }
-            items = withContext(Dispatchers.IO) { Scanner.scanDownloads(downloads, lib) }
+            scanned = 0
+            items = withContext(Dispatchers.IO) { Scanner.scanDownloads(downloads, lib) { scanned = it } }
             selected = emptySet()
             busy = false
         }
@@ -109,55 +115,56 @@ fun CleanupScreen(onNotice: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
+            HudData(
                 when {
-                    busy -> "Scanning…"
+                    busy -> "SCANNING…"
                     list == null -> ""
-                    list.isEmpty() -> "No audiobook files left in Downloads."
-                    else -> "${list.size} audiobook(s) in Downloads · ${fmtSize(list.sumOf { it.sizeBytes })}"
+                    list.isEmpty() -> "Downloads is clear."
+                    else -> "${list.size} audiobooks · ${fmtSize(list.sumOf { it.sizeBytes })}"
                 },
                 modifier = Modifier.weight(1f),
+                size = 14.dp,
             )
-            OutlinedButton(onClick = { scan() }, enabled = !busy) { Text("Rescan") }
+            HudButton("Rescan", onClick = { scan() }, enabled = !busy)
         }
 
         if (busy) {
-            Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
-                CircularProgressIndicator()
-            }
+            RadarScan("Scanning Downloads", "$scanned folders checked")
         } else if (list != null && list.isNotEmpty()) {
+            val biggest = list.maxOf { it.sizeBytes }.coerceAtLeast(1)
             GroupChips(group) { group = it }
             val groups = groupItems(list, group)
 
             LazyColumn(Modifier.weight(1f)) {
                 groups.forEach { (title, subtitle, members) ->
                     item(key = "h-$title") {
-                        SectionHeader(
+                        val paths = members.map { it.file.path }
+                        HudSection(
                             "$title · ${members.size} · ${fmtSize(members.sumOf { it.sizeBytes })}",
                             subtitle,
-                            onSelectAll = {
-                                val paths = members.map { it.file.path }
+                            action = if (selected.containsAll(paths)) "Select none" else "Select all",
+                            onAction = {
                                 selected = if (selected.containsAll(paths)) selected - paths.toSet() else selected + paths
                             },
                         )
                     }
-                    items(members, key = { it.file.path }) { item ->
-                        ItemRow(item, item.file.path in selected) {
+                    itemsIndexed(members, key = { _, it -> it.file.path }) { idx, item ->
+                        ItemRow(item, item.file.path in selected, idx, item.sizeBytes.toFloat() / biggest) {
                             selected = if (item.file.path in selected) selected - item.file.path else selected + item.file.path
                         }
                     }
                 }
             }
 
-            HorizontalDivider()
-            Row(
-                Modifier.fillMaxWidth().padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(onClick = { selected = emptySet() }, enabled = chosen.isNotEmpty()) { Text("Clear") }
-                Button(onClick = { confirm = true }, enabled = chosen.isNotEmpty(), modifier = Modifier.weight(1f)) {
-                    Text(if (chosen.isEmpty()) "Select items to archive" else "Archive ${chosen.size} · ${fmtSize(chosen.sumOf { it.sizeBytes })}")
-                }
+            HudActionBar {
+                HudButton("Clear", onClick = { selected = emptySet() }, enabled = chosen.isNotEmpty())
+                HudButton(
+                    if (chosen.isEmpty()) "Select to archive" else "Archive ${chosen.size} · ${fmtSize(chosen.sumOf { it.sizeBytes })}",
+                    onClick = { confirm = true },
+                    enabled = chosen.isNotEmpty(),
+                    filled = chosen.isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -206,24 +213,20 @@ fun SectionHeader(title: String, subtitle: String, onSelectAll: () -> Unit) {
 }
 
 @Composable
-fun ItemRow(item: Item, checked: Boolean, onToggle: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(checked = checked, onCheckedChange = { onToggle() })
-        Column(Modifier.weight(1f)) {
-            Text(item.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
-            Text(
-                "${fmtSize(item.sizeBytes)} · ${item.audioCount} file(s) · ${fmtDate(item.lastModified)}",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                item.file.parent ?: "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-                maxLines = 1,
-            )
+fun ItemRow(item: Item, checked: Boolean, index: Int, sizeFraction: Float, onToggle: () -> Unit) {
+    HudCard(selected = checked, index = index, onClick = onToggle) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            HudCheck(checked)
+            Column(Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(item.name, color = Hud.Text, fontSize = 15.sp, maxLines = 2)
+                Row {
+                    HudData(fmtSize(item.sizeBytes), color = Hud.Cyan)
+                    HudData("  ·  ${item.audioCount} file${if (item.audioCount == 1) "" else "s"}  ·  ${fmtDate(item.lastModified)}",
+                        color = Hud.Text.copy(alpha = 0.6f))
+                }
+                SizeBar(sizeFraction, color = if (item.inLibrary) Hud.Cyan else Color(0xFFFFB347))
+                HudData(item.file.parent?.removePrefix("/storage/emulated/0") ?: "", color = Hud.CyanDim, size = 10.dp)
+            }
         }
     }
 }
@@ -252,60 +255,53 @@ fun ArchiveScreen(onNotice: (String) -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                if (entries.isEmpty()) "The archive is empty."
-                else "${entries.size} item(s) · ${fmtSize(entries.sumOf { it.sizeBytes })}\n" +
-                    "Auto-deleted ${Archive.KEEP_DAYS} days after archiving.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                HudData(
+                    if (entries.isEmpty()) "ARCHIVE EMPTY"
+                    else "${entries.size} items · ${fmtSize(entries.sumOf { it.sizeBytes })}",
+                    size = 14.dp,
+                )
+                HudData("Auto-purge after ${Archive.KEEP_DAYS} days", color = Hud.CyanDim, size = 10.dp)
+            }
             if (entries.isNotEmpty()) {
-                TextButton(onClick = {
+                HudButton(if (allOn) "None" else "All", onClick = {
                     selected = if (allOn) emptySet() else entries.map { it.archived.path }.toSet()
-                }) { Text(if (allOn) "Select none" else "Select all") }
+                })
             }
         }
 
-        if (busy) {
-            Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
-                CircularProgressIndicator()
-            }
-        }
+        if (busy) RadarScan("Working", "${chosen.size} item(s)")
 
         LazyColumn(Modifier.weight(1f)) {
-            items(entries, key = { it.archived.path }) { e ->
+            itemsIndexed(entries, key = { _, it -> it.archived.path }) { idx, e ->
                 val on = e.archived.path in selected
-                val toggle = { selected = if (on) selected - e.archived.path else selected + e.archived.path }
-                val daysLeft = Archive.KEEP_DAYS - ((System.currentTimeMillis() - e.time) / 86_400_000L).toInt()
-                Row(
-                    Modifier.fillMaxWidth().clickable(onClick = toggle).padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = on, onCheckedChange = { toggle() })
-                    Column(Modifier.weight(1f)) {
-                        Text(e.archived.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
-                        Text(
-                            "${fmtSize(e.sizeBytes)} · archived ${fmtDate(e.time)} · $daysLeft day(s) left",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            "From: ${e.original.parent}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
-                            maxLines = 1,
-                        )
+                val daysLeft = (Archive.KEEP_DAYS - ((System.currentTimeMillis() - e.time) / 86_400_000L).toInt()).coerceAtLeast(0)
+                HudCard(selected = on, index = idx, accent = if (daysLeft <= 3) Hud.Red else Hud.Cyan, onClick = {
+                    selected = if (on) selected - e.archived.path else selected + e.archived.path
+                }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        HudCheck(on)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(e.archived.name, color = Hud.Text, fontSize = 15.sp, maxLines = 2)
+                            Row {
+                                HudData(fmtSize(e.sizeBytes), color = Hud.Cyan)
+                                HudData("  ·  archived ${fmtDate(e.time)}", color = Hud.Text.copy(alpha = 0.6f))
+                            }
+                            HudData(e.original.parent?.removePrefix("/storage/emulated/0") ?: "", color = Hud.CyanDim, size = 10.dp)
+                        }
+                        CountdownRing(daysLeft, Archive.KEEP_DAYS)
                     }
                 }
             }
         }
 
         if (entries.isNotEmpty()) {
-            HorizontalDivider()
-            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
+            HudActionBar {
+                HudButton(
+                    "Restore",
                     enabled = chosen.isNotEmpty() && !busy,
                     onClick = {
                         busy = true
@@ -317,15 +313,15 @@ fun ArchiveScreen(onNotice: (String) -> Unit) {
                             load()
                         }
                     },
-                ) { Text("Restore") }
-                Button(
+                )
+                HudButton(
+                    if (chosen.isEmpty()) "Select to delete" else "Delete ${chosen.size} · ${fmtSize(chosen.sumOf { it.sizeBytes })}",
                     enabled = chosen.isNotEmpty() && !busy,
                     onClick = { confirmDelete = true },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Hud.Red, contentColor = Hud.Bg),
+                    danger = true,
+                    filled = chosen.isNotEmpty(),
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (chosen.isEmpty()) "Select to delete" else "Delete ${chosen.size} · ${fmtSize(chosen.sumOf { it.sizeBytes })}")
-                }
+                )
             }
         }
     }
@@ -362,43 +358,80 @@ fun SettingsScreen() {
     var downloads by remember { mutableStateOf(Prefs.downloads(ctx)) }
     var library by remember { mutableStateOf(Prefs.library(ctx)) }
     var candidates by remember { mutableStateOf<List<File>>(emptyList()) }
+    var effects by remember { mutableStateOf(Prefs.effects(ctx)) }
+    var apiKey by remember { mutableStateOf(Prefs.apiKey(ctx)) }
+    var showKey by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
     ) {
-        OutlinedTextField(
-            value = downloads,
-            onValueChange = { downloads = it; Prefs.setDownloads(ctx, it) },
-            label = { Text("Downloads folder") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = library,
-            onValueChange = { library = it; Prefs.setLibrary(ctx, it) },
-            label = { Text("Audiobook library folder (Smart AudioBook Player)") },
-            supportingText = {
-                Text(
-                    if (library.isBlank()) "Not set: nothing will be marked as already in your library."
-                    else if (File(library).isDirectory) "Found ✓" else "Folder not found"
-                )
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedButton(onClick = {
-            scope.launch { candidates = withContext(Dispatchers.IO) { Scanner.findLibraryCandidates() } }
-        }) { Text("Find audiobook folders") }
-        candidates.forEach { c ->
-            TextButton(onClick = { library = c.path; Prefs.setLibrary(ctx, c.path) }) { Text(c.path) }
+        HudSection("Interface")
+        HudCard(selected = effects, onClick = { effects = !effects; Prefs.setEffects(ctx, effects) }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HudCheck(effects)
+                Column(Modifier.padding(start = 12.dp)) {
+                    Text("Sounds and vibration", color = Hud.Text, fontSize = 15.sp)
+                    HudData("Beeps and haptic ticks on taps", color = Hud.CyanDim, size = 11.dp)
+                }
+            }
         }
-        HorizontalDivider()
-        MusicAppPicker()
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Tip: Smart AudioBook Player shows which folder it uses as its library (its \"root\" folder) in its own settings.",
-            style = MaterialTheme.typography.bodySmall,
+
+        HudSection(
+            "Voice",
+            "Simple commands (open an app, play a song, battery, storage, clean up) work without this. " +
+                "Add a Claude API key from console.anthropic.com and Jarvis understands anything and can chat. " +
+                "Each request costs a fraction of a penny.",
         )
+        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it; Prefs.setApiKey(ctx, it) },
+                label = { Text("Claude API key") },
+                singleLine = true,
+                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                supportingText = { Text(if (apiKey.isBlank()) "Not set: local commands only" else "Voice link: ONLINE") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            HudButton(if (showKey) "Hide key" else "Show key", onClick = { showKey = !showKey })
+        }
+
+        HudSection("Folders")
+        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = downloads,
+                onValueChange = { downloads = it; Prefs.setDownloads(ctx, it) },
+                label = { Text("Downloads folder") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = library,
+                onValueChange = { library = it; Prefs.setLibrary(ctx, it) },
+                label = { Text("Audiobook library (Smart AudioBook Player)") },
+                supportingText = {
+                    Text(
+                        if (library.isBlank()) "Not set: nothing will be marked as already in your library."
+                        else if (File(library).isDirectory) "Found ✓" else "Folder not found"
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            HudButton("Find audiobook folders", onClick = {
+                scope.launch { candidates = withContext(Dispatchers.IO) { Scanner.findLibraryCandidates() } }
+            })
+        }
+        candidates.forEachIndexed { i, c ->
+            HudCard(index = i, selected = c.path == library, onClick = { library = c.path; Prefs.setLibrary(ctx, c.path) }) {
+                HudData(c.path.removePrefix("/storage/emulated/0"), size = 13.dp)
+            }
+        }
+        HudData(
+            "Smart AudioBook Player shows its library (\"root\") folder in its own settings.",
+            color = Hud.CyanDim, size = 11.dp, modifier = Modifier.padding(16.dp),
+        )
+
+        HudSection("Music app")
+        Box(Modifier.padding(horizontal = 16.dp)) { MusicAppPicker() }
     }
 }
 

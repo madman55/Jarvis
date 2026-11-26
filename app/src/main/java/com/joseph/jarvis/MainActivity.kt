@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Fx.init(this)
         setContent {
             JarvisTheme {
                 App(hasAccess = hasAccess.value, requestAccess = ::openAccessSettings)
@@ -85,7 +86,9 @@ fun App(hasAccess: Boolean, requestAccess: () -> Unit) {
     val ctx = LocalContext.current
     var dest by remember { mutableStateOf<Dest?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var booted by remember { mutableStateOf(false) }
     val setNotice: (String) -> Unit = { notice = it }
+    val voice = rememberVoiceSession(onOpen = { dest = it })
 
     // Tidy the archive each time the app opens.
     LaunchedEffect(hasAccess) {
@@ -102,10 +105,12 @@ fun App(hasAccess: Boolean, requestAccess: () -> Unit) {
         HudBackground()
         // Transparent surface so the background shows through, but all text defaults to HUD colour.
         Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = Hud.Text) {
-        if (!hasAccess) {
+        if (!booted) {
+            BootSequence(onDone = { booted = true })
+        } else if (!hasAccess) {
             AccessScreen(requestAccess)
         } else when (val d = dest) {
-            null -> HomeScreen(notice) { dest = it }
+            null -> HomeScreen(notice, voice) { dest = it }
             else -> HudScreen(d.label, onBack = { dest = null }) {
                 Column(Modifier.fillMaxSize()) {
                     notice?.let {
