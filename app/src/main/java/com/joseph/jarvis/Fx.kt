@@ -81,7 +81,7 @@ object Fx {
                 phase += 2 * PI * f / RATE
                 // quick fade in and out so there are no clicks
                 val env = min(1.0, min(k / 200.0, (n - k) / 400.0))
-                pcm[i++] = if (f == 0f) 0.toShort() else (sin(phase) * env * 0.22 * Short.MAX_VALUE).toInt().toShort()
+                pcm[i++] = if (f0 == 0f && f1 == 0f) 0.toShort() else (sin(phase) * env * 0.22 * Short.MAX_VALUE).toInt().toShort()
             }
         }
         val track = AudioTrack.Builder()
